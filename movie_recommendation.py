@@ -80,8 +80,7 @@ def jaccard_similarity_matrix(user, movies):
     return [ret_value]
 
 
-def content_based(vectorizer):
-    user_id = 430
+def content_based(vectorizer, user_id):
     # user preferences vector
     user_profile, movies_to_watch = create_user_profile(user_id)
 
@@ -125,7 +124,7 @@ def create_ratings_matrix(vectorizer):
                 matrix[row_idx][col_idx] = user_rated_movies.get_value(idx, 'rating')
             else:
                 matrix[row_idx][col_idx] = int(rating['rating'])
-    print (matrix)
+    return matrix
 
 
 def create_ratings_matrix_clustering(clusters_of_movies):
@@ -145,10 +144,10 @@ def create_ratings_matrix_clustering(clusters_of_movies):
             # if user didn't rate this movie, find most similar (by content) movie rated
             if rating.empty:
                 value = cluster_dict[clusters_of_movies[col_idx]]
-                matrix[row_idx][col_idx] = value[0] / value[1]
+                matrix[row_idx][col_idx] = round(value[0] / value[1])
             else:
                 matrix[row_idx][col_idx] = int(rating['rating'])
-    print (matrix)
+    return matrix
 
 
 # returns data frame with 3 columns: bag_of_words of a movie and rating user gave it (and id of a movie)
@@ -183,95 +182,53 @@ def get_user_cluster_mean(user_rated_movies, clusters):
             value[1] = 1
     return cluster_dict
 
+
+def get_collaborative_predictions(ratings_matrix, type, user_id):
+
+    if type == "user":
+        sim = cosine_similarity(ratings_matrix, ratings_matrix)
+        calculated_similarities = sim.dot(ratings_matrix)
+    else:
+        sim = cosine_similarity(ratings_matrix.T, ratings_matrix.T)
+        calculated_similarities = ratings_matrix.dot(sim)
+
+    # dec because each user is "similar" to himself
+    sum_similarities= list([np.abs(sim).sum(axis=1)])
+
+    user_similarities = calculated_similarities[user_id]
+    for i in range(len(user_similarities)):
+        user_similarities[i] = user_similarities[i]/(sum_similarities[user_id]-1)
+
+    rated_movies = get_user_rated_movies(user_id)
+
+    predictions = pd.Series(user_similarities).sort_values(ascending=False)
+
+    num = 0
+    for i in range(len(predictions)):
+        if i in rated_movies['id'].values.tolist():
+            continue
+
+        print("_____________________")
+        print(movies.iloc[i]['id'])
+        print(movies.iloc[i]['title'])
+        num = num + 1
+        if num == 10:
+            break
+
+
 if __name__ == '__main__':
     tfidf_vectorizer = train_vectorizer()
     clustering = KMeans(n_clusters=30)
     movies_transformed = tfidf_vectorizer.transform(movies['bag_of_words'])
     clustering.fit(movies_transformed)
 
-    #content_based(tfidf_vectorizer)
+    user_id = 430
+    #content_based(tfidf_vectorizer, user_id)
 
     # finds most similar movie
-    #create_ratings_matrix(tfidf_vectorizer)
+    #ratings_matrix = create_ratings_matrix(tfidf_vectorizer)
 
     # uses clusters to calculate missing values
-    create_ratings_matrix_clustering(clustering.predict(movies_transformed))
-    '''
-    movie_set = set(ratings['movieId'].values)
-    print("loaded")
-    id_counter = 0
-    new_ids = {}
-    for key, row in movies.iterrows():
-        if int(row['id']) not in movie_set:
-            movies = movies.drop(key)
-            continue
-        new_ids[int(row['id'])] = id_counter
-        movies.set_value(key, 'id', id_counter)
-        id_counter = id_counter + 1
+    ratings_matrix = create_ratings_matrix_clustering(clustering.predict(movies_transformed))
 
-    for key, row in movies_keywords.iterrows():
-        if int(row['id']) not in movie_set:
-            movies_keywords = movies_keywords.drop(key)
-            continue
-        movies_keywords.set_value(key, 'id', new_ids[int(row['id'])])
-
-    for key, row in movies_credits.iterrows():
-        if int(row['id']) not in movie_set:
-            movies_credits = movies_credits.drop(key)
-            continue
-        movies_credits.set_value(key, 'id', new_ids[int(row['id'])])
-
-    for key, row in ratings.iterrows():
-        if int(row['movieId']) not in new_ids.keys():
-            ratings = ratings.drop(key)
-            continue
-        ratings.set_value(key, 'movieId', new_ids[int(row['movieId'])])
-
-    user_id_counter = 0
-    prev = 0
-    for key, row in ratings.iterrows():
-        if prev != int(row['userId']):
-            prev = int(row['userId'])
-            user_id_counter = user_id_counter + 1
-
-        ratings.set_value(key, 'userId', id_counter)
-        
-        
-    print("writing)")
-    f = open("data/movies_metadata_transformed.csv", "w", encoding="utf-8")
-    #cols = ['adult', 'belongs_to_collection', 'budget', 'genres', 'homepage', 'id', 'imdb_id', 'original_language', 'original_title', 'overview', 'popularity', 'poster_path', 'production_companies', 'production_countries', 'release_date', 'revenue', 'runtime', 'spoken_languages', 'status', 'tagline', 'title', 'video', 'vote_average', 'vote_count']
-    cols = ['id', 'original_title', 'title', 'bag_of_words']
-    f.write(movies.to_csv(index=False, columns=cols, encoding="utf-8", line_terminator="\n"))
-    f.close()
-
-    #f = open("data/movies_metadata.csv", "w", encoding="utf-8")
-    #cols = ['adult', 'belongs_to_collection', 'budget', 'genres', 'homepage', 'id', 'imdb_id', 'original_language', 'original_title', 'overview', 'popularity', 'poster_path', 'production_companies', 'production_countries', 'release_date', 'revenue', 'runtime', 'spoken_languages', 'status', 'tagline', 'title', 'video', 'vote_average', 'vote_count']
-    #f.write(movies.to_csv(index=False, columns=cols, encoding="utf-8", line_terminator="\n"))
-    #f.close()
-
-    f = open("data/credits.csv", "w", encoding="utf-8")
-    one_fourth = movies_credits.loc[movies_credits['id']<10000]
-    sec_fourth = movies_credits.loc[(movies_credits['id']>=10000) & (movies_credits['id']<20000)]
-    third_fourth = movies_credits.loc[(movies_credits['id'] >= 20000) & (movies_credits['id'] < 30000)]
-    fourth_fourth = movies_credits.loc[(movies_credits['id'] >= 30000) & (movies_credits['id'] < 40000)]
-    fifth_fourth = movies_credits.loc[movies_credits['id'] >= 40000]
-    f.write(one_fourth.to_csv(index=False, encoding="utf-8", line_terminator="\n"))
-    f.write(sec_fourth.to_csv(header=False, index=False, encoding="utf-8", line_terminator="\n"))
-    f.write(third_fourth.to_csv(header=False, index=False, encoding="utf-8", line_terminator="\n"))
-    f.write(fourth_fourth.to_csv(header=False, index=False, encoding="utf-8", line_terminator="\n"))
-    f.write(fifth_fourth.to_csv(header=False, index=False, encoding="utf-8", line_terminator="\n"))
-    #f.write(movies_credits.to_csv(index=False, encoding="utf-8", line_terminator="\n"))
-    f.close()
-
-    f = open("data/keywords.csv", "w", encoding="utf-8")
-    one_half = movies_keywords.loc[movies_keywords['id']<22000]
-    sec_half = movies_keywords.loc[movies_keywords['id']>=22000]
-    f.write(one_half.to_csv(index=False, encoding="utf-8", line_terminator="\n"))
-    f.write(sec_half.to_csv(header=False, index=False, encoding="utf-8", line_terminator="\n"))
-    #f.write(movies_keywords.to_csv(index=False, encoding="utf-8", line_terminator="\n"))
-    f.close()
-
-    f = open("data/ratings_mini.csv", "w", encoding="utf-8")
-    f.write(ratings.to_csv(index=False, line_terminator="\n", encoding="utf-8"))
-    f.close()
-    '''
+    get_collaborative_predictions(ratings_matrix, 'user', user_id)
